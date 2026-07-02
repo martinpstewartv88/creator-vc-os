@@ -37,13 +37,14 @@ type OrderLine = {
   order_number: string | null
   purchase_type: string
   financial_status: string | null
-  delivery_status: 'pending_shipping' | 'shipping_paid' | 'dispatched' | null
+  delivery_status: 'pending_shipping' | 'shipping_paid' | 'dispatched' | 'digital' | null
 }
 
 const DELIVERY_LABEL: Record<string, string> = {
   pending_shipping: 'Pending Shipping Payment',
   shipping_paid:    'Shipping Paid',
   dispatched:       'Dispatched',
+  digital:          'Digital',
 }
 
 // Tailwind classes for each delivery state — kept inline rather than
@@ -52,6 +53,7 @@ const DELIVERY_CLASS: Record<string, string> = {
   pending_shipping: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
   shipping_paid:    'bg-sky-500/15 text-sky-300 border-sky-500/30',
   dispatched:       'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  digital:          'bg-violet-500/15 text-violet-300 border-violet-500/30',
 }
 
 const PAYMENT_LABEL: Record<string, string> = {
