@@ -229,8 +229,7 @@ function ChangeEmailModal({
           </p>
           <p className="text-sm text-zinc-300 mt-1 break-all">{customer.email}</p>
           <p className="text-[11px] text-zinc-600 mt-0.5">
-            Cascades across orders, entitlements, payhere, fulfilment and shipping marks.
-            Freshdesk ticket <code className="text-[10px]">requester_email</code> stays as-is (customer_id linkage handles the join).
+            If the new email already belongs to another customer, we&apos;ll merge the two accounts.
           </p>
         </div>
 
@@ -248,9 +247,6 @@ function ChangeEmailModal({
                 placeholder="new@example.com"
                 className={inputCls}
               />
-              <p className="text-[10px] text-zinc-600 mt-1">
-                If this email already belongs to another customer, we&apos;ll switch to a merge preview.
-              </p>
             </label>
             <label className="block">
               <span className="block text-xs font-medium text-zinc-400 mb-1.5">Reason / note (optional)</span>
@@ -269,16 +265,9 @@ function ChangeEmailModal({
         {step === 'confirm' && mode === 'rename' && rename && (
           <div className="space-y-4">
             <div className="rounded-lg bg-zinc-800/60 border border-zinc-800 p-3">
-              <p className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-2">What will move</p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-2">Summary</p>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                <CountRow label="Raw orders (Shopify/Gumroad live)" n={rename.counts.raw_orders} />
-                <CountRow label="Historic orders"                   n={rename.counts.historic_orders} />
-                <CountRow label="Order entitlements"                n={rename.counts.order_entitlements} />
-                <CountRow label="Payhere payments"                  n={rename.counts.payhere_payments} />
-                <CountRow label="Acutrack fulfilment"               n={rename.counts.acutrack_received} />
-                <CountRow label="Backer fulfilment queue"           n={rename.counts.backer_fulfillment} />
-                <CountRow label="Manual shipping marks"             n={rename.counts.manual_shipping_marks} />
-                <CountRow label="Tickets (linked by ID, not moved)" n={rename.counts.tickets_by_requester_email_untouched} muted />
+                <CountRow label="Orders" n={(rename.counts.raw_orders ?? 0) + (rename.counts.historic_orders ?? 0)} />
               </dl>
               <p className="mt-3 text-[11px] text-zinc-500">
                 <span className="text-zinc-400 font-mono">{rename.old_email}</span>{' → '}
@@ -305,38 +294,19 @@ function ChangeEmailModal({
         {step === 'confirm' && mode === 'merge' && merge && (
           <div className="space-y-4">
             <div className="rounded-lg bg-amber-950/40 border border-amber-900/60 p-3">
-              <p className="text-[10px] uppercase tracking-wide text-amber-300 font-medium mb-1">Merge — this customer will be deleted</p>
               <p className="text-xs text-amber-200/90">
-                <span className="font-mono">{merge.merged.email}</span> (id&nbsp;{merge.merged.id}) will be
-                merged into <span className="font-mono">{merge.survivor.email}</span> (id&nbsp;{merge.survivor.id}) and then
-                deleted. All orders, entitlements, payhere rows, junction links, and tickets re-parent to the survivor.
+                These two accounts will be merged. All of{' '}
+                <span className="font-mono">{merge.merged.email}</span>&apos;s orders and tickets will move over to{' '}
+                <span className="font-mono">{merge.survivor.email}</span>, and this record will be removed.
               </p>
             </div>
 
             <div className="rounded-lg bg-zinc-800/60 border border-zinc-800 p-3">
-              <p className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-2">What will move onto the survivor</p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-2">Summary</p>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                <CountRow label="Raw orders (Shopify/Gumroad live)"    n={merge.counts.raw_orders} />
-                <CountRow label="Historic orders"                       n={merge.counts.historic_orders} />
-                <CountRow label="Order entitlements"                    n={merge.counts.order_entitlements} />
-                <CountRow label="Payhere payments"                      n={merge.counts.payhere_payments} />
-                <CountRow label="Acutrack fulfilment"                   n={merge.counts.acutrack_received} />
-                <CountRow label="Backer fulfilment queue"               n={merge.counts.backer_fulfillment} />
-                <CountRow label="Manual shipping marks"                 n={merge.counts.manual_shipping_marks} />
-                <CountRow label="Junction (customer_raw_orders)"        n={merge.counts.junction_raw_orders} />
-                <CountRow label="Junction (customer_campaign_orders)"   n={merge.counts.junction_campaign_orders} />
-                <CountRow label="Tickets (re-pointed by customer_id)"   n={merge.counts.tickets_by_customer_id} />
-                <CountRow label="Tickets requester_email left untouched" n={merge.counts.tickets_requester_email_left_untouched} muted />
+                <CountRow label="Orders"      n={(merge.counts.raw_orders ?? 0) + (merge.counts.historic_orders ?? 0)} />
+                <CountRow label="Tickets"     n={merge.counts.tickets_by_customer_id} />
               </dl>
-              {merge.backfill_fields.length > 0 && (
-                <p className="mt-3 text-[11px] text-zinc-500">
-                  <span className="text-zinc-400">Backfill onto survivor (currently NULL):</span>{' '}
-                  <span className="text-zinc-300">{merge.backfill_fields.join(', ')}</span>
-                </p>
-              )}
-              {merge.backfill_fields.length === 0 && (
-                <p className="mt-3 text-[11px] text-zinc-600">Survivor has no NULL fields to backfill from the merged customer.</p>
-              )}
             </div>
 
             <label className="block">
@@ -396,7 +366,7 @@ function ChangeEmailModal({
               : (step === 'input'
                   ? 'Preview'
                   : mode === 'merge'
-                    ? 'Merge and delete this customer'
+                    ? 'Merge accounts'
                     : 'Change email')}
           </button>
         </div>
