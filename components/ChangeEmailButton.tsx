@@ -5,10 +5,9 @@ import { useRouter } from 'next/navigation'
 import { AtSign } from 'lucide-react'
 import { createClient } from '@/lib/supabase-browser'
 import { useAuth } from './AuthProvider'
-import { isOwner } from '@/lib/auth'
 import { formatErrorMessage } from '@/lib/format-error'
 
-// Owner-only "Change or merge email" action.
+// "Change or merge email" action.
 //
 // Two paths, one entry point:
 //   RENAME — target email is free. Preview shows what will move across
@@ -19,8 +18,9 @@ import { formatErrorMessage } from '@/lib/format-error'
 //     the survivor get backfilled from this customer. Then this row is
 //     deleted.
 //
-// Gated by owner+admin. Belt: this hides the button. Braces: the DB RPCs
-// refuse a non-owner + non-admin regardless.
+// Visible to admin + support (roles that manage customers day-to-day).
+// The DB RPCs enforce the same staff gate, so a role change alone can't
+// widen access without a matching migration.
 //
 // Freshdesk decision (unchanged): tickets.customer_id is re-pointed (merge
 // only — rename doesn't touch it). tickets.requester_email is left as
@@ -88,10 +88,10 @@ export default function ChangeEmailButton({
 }: {
   customer: { id: number; email: string }
 }) {
-  const { user, role } = useAuth()
+  const { role } = useAuth()
   const [open, setOpen] = useState(false)
 
-  if (!isOwner(user?.email) || role !== 'admin') return null
+  if (role !== 'admin' && role !== 'support') return null
 
   if (!open) {
     return (
@@ -99,7 +99,7 @@ export default function ChangeEmailButton({
         type="button"
         onClick={() => setOpen(true)}
         className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium transition-colors"
-        title="Owner-only: change this customer's email, or merge into an existing one."
+        title="Change this customer's email, or merge them into an existing customer."
       >
         <AtSign size={14} strokeWidth={1.75} />
         Change or merge email
