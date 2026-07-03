@@ -12,6 +12,7 @@ import CustomerCampaigns from '@/components/CustomerCampaigns'
 import CustomerTicketsList from '@/components/CustomerTicketsList'
 import CustomerActivityTabs from '@/components/CustomerActivityTabs'
 import EditCustomerButton from '@/components/EditCustomerButton'
+import ChangeEmailButton from '@/components/ChangeEmailButton'
 
 function fmt(n: number | string | null, currency = false) {
   if (n === null || n === undefined) return '—'
@@ -86,20 +87,23 @@ export default async function CustomerDetailPage({
           <h1 className="text-xl md:text-2xl font-semibold text-white break-words">{customer.full_name || email}</h1>
           <p className="text-xs md:text-sm text-zinc-500 mt-1 break-all">{email}{customer.phone ? ` · ${customer.phone}` : ''}</p>
         </div>
-        <EditCustomerButton
-          customer={{
-            id: customer.id,
-            email: customer.email,
-            first_name: customer.first_name,
-            last_name: customer.last_name,
-            phone: customer.phone,
-            shipping_address_1: customer.shipping_address_1,
-            shipping_address_2: customer.shipping_address_2,
-            shipping_city: customer.shipping_city,
-            shipping_zip: customer.shipping_zip,
-            shipping_country: customer.shipping_country,
-          }}
-        />
+        <div className="flex flex-wrap gap-2">
+          <ChangeEmailButton customer={{ id: customer.id, email: customer.email }} />
+          <EditCustomerButton
+            customer={{
+              id: customer.id,
+              email: customer.email,
+              first_name: customer.first_name,
+              last_name: customer.last_name,
+              phone: customer.phone,
+              shipping_address_1: customer.shipping_address_1,
+              shipping_address_2: customer.shipping_address_2,
+              shipping_city: customer.shipping_city,
+              shipping_zip: customer.shipping_zip,
+              shipping_country: customer.shipping_country,
+            }}
+          />
+        </div>
       </div>
 
       {/* KPI cards */}
