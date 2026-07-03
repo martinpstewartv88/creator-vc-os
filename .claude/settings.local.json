@@ -136,7 +136,10 @@
       "Bash(node --check scripts/replay-shopify-orders.mjs)",
       "Bash(curl -s -o /tmp/r1.txt -w 'HTTP %{http_code}\\\\n' -X POST https://xwokhafcllstcnlcberv.supabase.co/functions/v1/shopify-webhook -H 'Content-Type: application/json' -d '{\"test\":\"no_topic\"}')",
       "Bash(curl -s -o /tmp/r2.txt -w 'HTTP %{http_code}\\\\n' -X POST https://xwokhafcllstcnlcberv.supabase.co/functions/v1/shopify-webhook -H 'Content-Type: application/json' -H 'X-Shopify-Topic: orders/create' -H 'X-Shopify-Shop-Domain: creatorvc.myshopify.com' -d '{\"id\":\"smoketest-v39-9999\",\"name\":\"#9999-SMOKETEST\",\"email\":\"smoketest@example.com\",\"financial_status\":\"pending\",\"line_items\":[]}')",
-      "Bash(curl -s -w '\\\\nHTTP %{http_code}\\\\n' -X POST https://xwokhafcllstcnlcberv.supabase.co/functions/v1/shopify-webhook -H 'Content-Type: application/json' -H 'X-Shopify-Topic: orders/create' -H 'X-Shopify-Shop-Domain: creatorvc.myshopify.com' -d '{\"id\":\"smoketest-v40-9999\",\"name\":\"#9999-SMOKETEST\",\"email\":\"smoketest@example.com\",\"financial_status\":\"pending\",\"line_items\":[]}')"
+      "Bash(curl -s -w '\\\\nHTTP %{http_code}\\\\n' -X POST https://xwokhafcllstcnlcberv.supabase.co/functions/v1/shopify-webhook -H 'Content-Type: application/json' -H 'X-Shopify-Topic: orders/create' -H 'X-Shopify-Shop-Domain: creatorvc.myshopify.com' -d '{\"id\":\"smoketest-v40-9999\",\"name\":\"#9999-SMOKETEST\",\"email\":\"smoketest@example.com\",\"financial_status\":\"pending\",\"line_items\":[]}')",
+      "mcp__1eebb9f0-7856-4027-adbb-af4079dd40b8__execute_sql",
+      "mcp__1eebb9f0-7856-4027-adbb-af4079dd40b8__list_tables",
+      "Bash(git log *)"
     ]
   }
 }
