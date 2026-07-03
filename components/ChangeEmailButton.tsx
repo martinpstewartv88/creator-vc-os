@@ -8,24 +8,25 @@ import { useAuth } from './AuthProvider'
 import { isOwner } from '@/lib/auth'
 import { formatErrorMessage } from '@/lib/format-error'
 
-// Owner-only "Change email" action for a customer.
+// Owner-only "Change or merge email" action.
 //
-// Wire is two-step:
-//   1. Operator types the new email and hits Preview → we call the read-only
-//      preview_customer_email_change RPC. It returns per-table row counts and
-//      a collision flag ("email already belongs to customer #123").
-//   2. Operator sees the counts, retypes the new email in a confirm input,
-//      and hits Change → we call admin_change_customer_email which does the
-//      atomic swap across 8 tables + refreshes snapshots.
+// Two paths, one entry point:
+//   RENAME — target email is free. Preview shows what will move across
+//     the 8 satellite tables, retype-target confirmation, atomic swap.
+//   MERGE  — target email already belongs to another customer. Preview
+//     flips to a merge view: THIS customer will die, its orders and
+//     junction rows re-point at the target (survivor), NULL fields on
+//     the survivor get backfilled from this customer. Then this row is
+//     deleted.
 //
-// Gated by owner+admin at the DB layer too — the button just won't render for
-// anyone else. The DB RPCs will refuse even if a non-owner somehow calls them.
+// Gated by owner+admin. Belt: this hides the button. Braces: the DB RPCs
+// refuse a non-owner + non-admin regardless.
 //
-// Freshdesk decision (v1): DB-only. tickets.customer_id linkage stays intact;
-// tickets.requester_email is left as whatever Freshdesk knows. The audit log
-// records the count that were untouched.
+// Freshdesk decision (unchanged): tickets.customer_id is re-pointed (merge
+// only — rename doesn't touch it). tickets.requester_email is left as
+// whatever Freshdesk knows. Audit log records the count left untouched.
 
-type Counts = {
+type RenameCounts = {
   raw_orders?: number
   historic_orders?: number
   order_entitlements?: number
@@ -37,14 +38,50 @@ type Counts = {
   tickets_by_requester_email_untouched?: number
 }
 
-type PreviewResult = {
+type RenamePreview = {
   customer_id: number
   old_email: string
   new_email: string
   collision: boolean
   collision_customer_id: number | null
-  counts: Counts
+  counts: RenameCounts
 }
+
+type CustomerBrief = {
+  id: number
+  email: string
+  first_name: string | null
+  last_name: string | null
+  phone: string | null
+  shipping_address_1: string | null
+  shipping_address_2: string | null
+  shipping_city: string | null
+  shipping_zip: string | null
+  shipping_country: string | null
+}
+
+type MergeCounts = {
+  raw_orders?: number
+  historic_orders?: number
+  order_entitlements?: number
+  payhere_payments?: number
+  manual_shipping_marks?: number
+  acutrack_received?: number
+  backer_fulfillment?: number
+  junction_raw_orders?: number
+  junction_campaign_orders?: number
+  tickets_by_customer_id?: number
+  tickets_requester_email_left_untouched?: number
+}
+
+type MergePreview = {
+  survivor: CustomerBrief
+  merged:   CustomerBrief
+  backfill_fields: string[]
+  counts: MergeCounts
+}
+
+type Mode = 'rename' | 'merge'
 
 export default function ChangeEmailButton({
   customer,
@@ -54,8 +91,6 @@ export default function ChangeEmailButton({
   const { user, role } = useAuth()
   const [open, setOpen] = useState(false)
 
-  // Owner + admin only. Belt: this hides the button. Braces: the DB RPC
-  // refuses non-owner + non-admin regardless.
   if (!isOwner(user?.email) || role !== 'admin') return null
 
   if (!open) {
@@ -64,10 +99,10 @@ export default function ChangeEmailButton({
         type="button"
         onClick={() => setOpen(true)}
         className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium transition-colors"
-        title="Owner-only: change this customer's email and cascade across all linked tables."
+        title="Owner-only: change this customer's email, or merge into an existing one."
       >
         <AtSign size={14} strokeWidth={1.75} />
-        Change email
+        Change or merge email
       </button>
     )
   }
@@ -85,13 +120,15 @@ function ChangeEmailModal({
   const router = useRouter()
   const supabase = createClient()
 
-  const [step, setStep] = useState<'input' | 'confirm'>('input')
-  const [newEmail, setNewEmail]     = useState('')
-  const [confirmEmail, setConfirm]  = useState('')
-  const [note, setNote]             = useState('')
-  const [preview, setPreview]       = useState<PreviewResult | null>(null)
-  const [busy, setBusy]             = useState(false)
-  const [error, setError]           = useState<string | null>(null)
+  const [step, setStep]        = useState<'input' | 'confirm'>('input')
+  const [mode, setMode]        = useState<Mode>('rename')
+  const [newEmail, setNewEmail] = useState('')
+  const [confirmEmail, setConfirm] = useState('')
+  const [note, setNote]        = useState('')
+  const [rename, setRename]    = useState<RenamePreview | null>(null)
+  const [merge, setMerge]      = useState<MergePreview | null>(null)
+  const [busy, setBusy]        = useState(false)
+  const [error, setError]      = useState<string | null>(null)
 
   const doPreview = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -103,16 +140,28 @@ function ChangeEmailModal({
         p_new_email: newEmail.trim(),
       })
       if (error) throw error
-      const result = data as PreviewResult
-      setPreview(result)
-      if (result.collision) {
-        setError(
-          `That email already belongs to customer #${result.collision_customer_id}. ` +
-          `Merging customers is a separate operation — please resolve manually first.`,
-        )
-      } else {
+      const renameResult = data as RenamePreview
+
+      if (!renameResult.collision) {
+        setMode('rename')
+        setRename(renameResult)
+        setMerge(null)
         setStep('confirm')
+        return
       }
+
+      // Collision — pivot to merge preview. Survivor = the OTHER customer;
+      // the currently-viewed customer becomes the merged/dead record.
+      const survivorId = renameResult.collision_customer_id!
+      const { data: mergeData, error: mergeErr } = await supabase.rpc('preview_customer_merge', {
+        p_survivor_id: survivorId,
+        p_merged_id:   customer.id,
+      })
+      if (mergeErr) throw mergeErr
+      setMode('merge')
+      setRename(renameResult)
+      setMerge(mergeData as MergePreview)
+      setStep('confirm')
     } catch (err) {
       setError(formatErrorMessage(err))
     } finally {
@@ -120,27 +169,44 @@ function ChangeEmailModal({
     }
   }
 
-  const doChange = async (e: React.FormEvent) => {
+  const doCommit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
-    if (!preview) return
-    if (confirmEmail.trim().toLowerCase() !== preview.new_email) {
-      setError('Confirmation email doesn\'t match. Type the new email again exactly.')
-      return
-    }
     setBusy(true)
     try {
-      const { data, error } = await supabase.rpc('admin_change_customer_email', {
-        p_customer_id: customer.id,
-        p_new_email: preview.new_email,
-        p_note: note.trim() ? note.trim() : null,
-      })
-      if (error) throw error
-      const result = data as { new_email: string }
-      // Redirect to the customer detail page under the new email so the
-      // route param, the header, and every RPC re-fetch is consistent.
-      router.push(`/customers/${encodeURIComponent(result.new_email)}`)
-      router.refresh()
+      if (mode === 'rename') {
+        if (!rename) return
+        if (confirmEmail.trim().toLowerCase() !== rename.new_email) {
+          setError('Confirmation email doesn\'t match. Type the new email again exactly.')
+          setBusy(false)
+          return
+        }
+        const { data, error } = await supabase.rpc('admin_change_customer_email', {
+          p_customer_id: customer.id,
+          p_new_email:   rename.new_email,
+          p_note:        note.trim() ? note.trim() : null,
+        })
+        if (error) throw error
+        const result = data as { new_email: string }
+        router.push(`/customers/${encodeURIComponent(result.new_email)}`)
+        router.refresh()
+      } else {
+        if (!merge) return
+        if (confirmEmail.trim().toLowerCase() !== merge.survivor.email.toLowerCase()) {
+          setError('Confirmation email doesn\'t match the survivor. Type it again exactly.')
+          setBusy(false)
+          return
+        }
+        const { data, error } = await supabase.rpc('admin_merge_customers', {
+          p_survivor_id: merge.survivor.id,
+          p_merged_id:   customer.id,
+          p_note:        note.trim() ? note.trim() : null,
+        })
+        if (error) throw error
+        const result = data as { survivor_email: string }
+        router.push(`/customers/${encodeURIComponent(result.survivor_email)}`)
+        router.refresh()
+      }
     } catch (err) {
       setError(formatErrorMessage(err))
       setBusy(false)
@@ -154,11 +220,13 @@ function ChangeEmailModal({
     >
       <form
         onClick={(e) => e.stopPropagation()}
-        onSubmit={step === 'input' ? doPreview : doChange}
+        onSubmit={step === 'input' ? doPreview : doCommit}
         className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-xl p-5 md:p-6 space-y-4 max-h-[90vh] overflow-y-auto"
       >
         <div>
-          <p className="text-xs uppercase tracking-wide text-zinc-500 font-medium">Change customer email</p>
+          <p className="text-xs uppercase tracking-wide text-zinc-500 font-medium">
+            {step === 'input' ? 'Change or merge email' : mode === 'rename' ? 'Rename customer email' : 'Merge customer'}
+          </p>
           <p className="text-sm text-zinc-300 mt-1 break-all">{customer.email}</p>
           <p className="text-[11px] text-zinc-600 mt-0.5">
             Cascades across orders, entitlements, payhere, fulfilment and shipping marks.
@@ -180,6 +248,9 @@ function ChangeEmailModal({
                 placeholder="new@example.com"
                 className={inputCls}
               />
+              <p className="text-[10px] text-zinc-600 mt-1">
+                If this email already belongs to another customer, we&apos;ll switch to a merge preview.
+              </p>
             </label>
             <label className="block">
               <span className="block text-xs font-medium text-zinc-400 mb-1.5">Reason / note (optional)</span>
@@ -188,39 +259,89 @@ function ChangeEmailModal({
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 disabled={busy}
-                placeholder='e.g. "Customer typo on original Shopify order"'
+                placeholder='e.g. "Customer requested consolidation into gmail address"'
                 className={inputCls}
               />
             </label>
           </fieldset>
         )}
 
-        {step === 'confirm' && preview && (
+        {step === 'confirm' && mode === 'rename' && rename && (
           <div className="space-y-4">
             <div className="rounded-lg bg-zinc-800/60 border border-zinc-800 p-3">
-              <p className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-2">
-                What will move
-              </p>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-2">What will move</p>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                <CountRow label="Raw orders (Shopify/Gumroad live)" n={preview.counts.raw_orders} />
-                <CountRow label="Historic orders"                   n={preview.counts.historic_orders} />
-                <CountRow label="Order entitlements"                n={preview.counts.order_entitlements} />
-                <CountRow label="Payhere payments"                  n={preview.counts.payhere_payments} />
-                <CountRow label="Acutrack fulfilment"               n={preview.counts.acutrack_received} />
-                <CountRow label="Backer fulfilment queue"           n={preview.counts.backer_fulfillment} />
-                <CountRow label="Manual shipping marks"             n={preview.counts.manual_shipping_marks} />
-                <CountRow label="Tickets (linked by ID, not moved)" n={preview.counts.tickets_by_requester_email_untouched} muted />
+                <CountRow label="Raw orders (Shopify/Gumroad live)" n={rename.counts.raw_orders} />
+                <CountRow label="Historic orders"                   n={rename.counts.historic_orders} />
+                <CountRow label="Order entitlements"                n={rename.counts.order_entitlements} />
+                <CountRow label="Payhere payments"                  n={rename.counts.payhere_payments} />
+                <CountRow label="Acutrack fulfilment"               n={rename.counts.acutrack_received} />
+                <CountRow label="Backer fulfilment queue"           n={rename.counts.backer_fulfillment} />
+                <CountRow label="Manual shipping marks"             n={rename.counts.manual_shipping_marks} />
+                <CountRow label="Tickets (linked by ID, not moved)" n={rename.counts.tickets_by_requester_email_untouched} muted />
               </dl>
               <p className="mt-3 text-[11px] text-zinc-500">
-                <span className="text-zinc-400 font-mono">{preview.old_email}</span>
-                {' → '}
-                <span className="text-white font-mono">{preview.new_email}</span>
+                <span className="text-zinc-400 font-mono">{rename.old_email}</span>{' → '}
+                <span className="text-white font-mono">{rename.new_email}</span>
               </p>
             </div>
 
             <label className="block">
+              <span className="block text-xs font-medium text-zinc-400 mb-1.5">Retype the new email to confirm</span>
+              <input
+                type="email"
+                required
+                autoFocus
+                value={confirmEmail}
+                onChange={(e) => setConfirm(e.target.value)}
+                disabled={busy}
+                placeholder={rename.new_email}
+                className={inputCls}
+              />
+            </label>
+          </div>
+        )}
+
+        {step === 'confirm' && mode === 'merge' && merge && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-amber-950/40 border border-amber-900/60 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-amber-300 font-medium mb-1">Merge — this customer will be deleted</p>
+              <p className="text-xs text-amber-200/90">
+                <span className="font-mono">{merge.merged.email}</span> (id&nbsp;{merge.merged.id}) will be
+                merged into <span className="font-mono">{merge.survivor.email}</span> (id&nbsp;{merge.survivor.id}) and then
+                deleted. All orders, entitlements, payhere rows, junction links, and tickets re-parent to the survivor.
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-zinc-800/60 border border-zinc-800 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-2">What will move onto the survivor</p>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <CountRow label="Raw orders (Shopify/Gumroad live)"    n={merge.counts.raw_orders} />
+                <CountRow label="Historic orders"                       n={merge.counts.historic_orders} />
+                <CountRow label="Order entitlements"                    n={merge.counts.order_entitlements} />
+                <CountRow label="Payhere payments"                      n={merge.counts.payhere_payments} />
+                <CountRow label="Acutrack fulfilment"                   n={merge.counts.acutrack_received} />
+                <CountRow label="Backer fulfilment queue"               n={merge.counts.backer_fulfillment} />
+                <CountRow label="Manual shipping marks"                 n={merge.counts.manual_shipping_marks} />
+                <CountRow label="Junction (customer_raw_orders)"        n={merge.counts.junction_raw_orders} />
+                <CountRow label="Junction (customer_campaign_orders)"   n={merge.counts.junction_campaign_orders} />
+                <CountRow label="Tickets (re-pointed by customer_id)"   n={merge.counts.tickets_by_customer_id} />
+                <CountRow label="Tickets requester_email left untouched" n={merge.counts.tickets_requester_email_left_untouched} muted />
+              </dl>
+              {merge.backfill_fields.length > 0 && (
+                <p className="mt-3 text-[11px] text-zinc-500">
+                  <span className="text-zinc-400">Backfill onto survivor (currently NULL):</span>{' '}
+                  <span className="text-zinc-300">{merge.backfill_fields.join(', ')}</span>
+                </p>
+              )}
+              {merge.backfill_fields.length === 0 && (
+                <p className="mt-3 text-[11px] text-zinc-600">Survivor has no NULL fields to backfill from the merged customer.</p>
+              )}
+            </div>
+
+            <label className="block">
               <span className="block text-xs font-medium text-zinc-400 mb-1.5">
-                Retype the new email to confirm
+                Retype the survivor email to confirm
               </span>
               <input
                 type="email"
@@ -229,7 +350,7 @@ function ChangeEmailModal({
                 value={confirmEmail}
                 onChange={(e) => setConfirm(e.target.value)}
                 disabled={busy}
-                placeholder={preview.new_email}
+                placeholder={merge.survivor.email}
                 className={inputCls}
               />
             </label>
@@ -254,7 +375,7 @@ function ChangeEmailModal({
           {step === 'confirm' && (
             <button
               type="button"
-              onClick={() => { setStep('input'); setError(null) }}
+              onClick={() => { setStep('input'); setError(null); setConfirm('') }}
               disabled={busy}
               className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors disabled:opacity-50"
             >
@@ -264,11 +385,19 @@ function ChangeEmailModal({
           <button
             type="submit"
             disabled={busy}
-            className="px-4 py-2 rounded-lg bg-[#3B9EE8] hover:bg-[#3691d4] disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            className={
+              step === 'confirm' && mode === 'merge'
+                ? 'px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium transition-colors'
+                : 'px-4 py-2 rounded-lg bg-[#3B9EE8] hover:bg-[#3691d4] disabled:opacity-50 text-white text-sm font-medium transition-colors'
+            }
           >
             {busy
-              ? (step === 'input' ? 'Checking…' : 'Changing…')
-              : (step === 'input' ? 'Preview change' : 'Change email')}
+              ? (step === 'input' ? 'Checking…' : mode === 'merge' ? 'Merging…' : 'Changing…')
+              : (step === 'input'
+                  ? 'Preview'
+                  : mode === 'merge'
+                    ? 'Merge and delete this customer'
+                    : 'Change email')}
           </button>
         </div>
       </form>
