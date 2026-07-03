@@ -356,6 +356,12 @@ export default function CustomerCampaigns({
             p_note: note.trim() ? note.trim() : null,
           })
           if (error) throw error
+          // Fire-and-forget: notify Acutrack so they can queue the order
+          // for dispatch. Failures are logged server-side in
+          // aa_01_campaigns.acutrack_send_log but never block the mark.
+          void supabase.functions
+            .invoke('acutrack-send-order', { body: { shopify_order_id: orderId } })
+            .catch((err) => console.warn('[acutrack-send-order] invoke failed', err))
           await refetchCampaign(campaignId)
         } catch (e) {
           alert(`Mark shipping paid failed: ${formatErrorMessage(e)}`)
