@@ -18,9 +18,9 @@ import { formatErrorMessage } from '@/lib/format-error'
 //     the survivor get backfilled from this customer. Then this row is
 //     deleted.
 //
-// Visible to admin + support (roles that manage customers day-to-day).
-// The DB RPCs enforce the same staff gate, so a role change alone can't
-// widen access without a matching migration.
+// Visible to any staff role (admin / team / support). The DB RPCs
+// enforce the same staff gate, so a role change alone can't widen
+// access without a matching migration.
 //
 // Freshdesk decision (unchanged): tickets.customer_id is re-pointed (merge
 // only — rename doesn't touch it). tickets.requester_email is left as
@@ -91,7 +91,7 @@ export default function ChangeEmailButton({
   const { role } = useAuth()
   const [open, setOpen] = useState(false)
 
-  if (role !== 'admin' && role !== 'support') return null
+  if (role !== 'admin' && role !== 'team' && role !== 'support') return null
 
   if (!open) {
     return (
