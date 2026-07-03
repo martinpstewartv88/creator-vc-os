@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import Link from 'next/link'
 import { useAuth } from './AuthProvider'
-import { isOwner } from '@/lib/auth'
 import { formatErrorMessage } from '@/lib/format-error'
 
 type CampaignDetail = { campaign_name: string; campaign_id: number; legacy_code: string; source: string }
@@ -112,9 +111,9 @@ function OrderHeader({
 }: {
   ref: string
   line: OrderLine
-  // When rendered as the owner viewing a Shopify (raw_orders) row, the
-  // caller passes in a busy flag + handlers so we can show a manual
-  // mark / unmark action alongside the shipping badge. Non-owners and
+  // When a staff user is viewing a Shopify (raw_orders) row, the caller
+  // passes in a busy flag + handlers so we can show a manual mark /
+  // unmark action alongside the shipping badge. Non-staff sessions and
   // non-shopify rows get `undefined` and see the read-only header.
   ownerControls?: {
     busy: boolean
@@ -150,7 +149,7 @@ function OrderHeader({
                 void ownerControls!.onMarkPaid()
               }}
               className="text-[10px] font-medium px-2 py-0.5 rounded border border-sky-500/40 text-sky-300 hover:text-white hover:bg-sky-500/20 transition-colors disabled:opacity-50"
-              title="Owner-only: mark this order's shipping as paid via an off-poll channel."
+              title="Mark this order's shipping as paid via an off-poll channel."
             >
               {ownerControls!.busy ? '…' : 'Mark shipping paid'}
             </button>
@@ -164,7 +163,7 @@ function OrderHeader({
                 void ownerControls!.onUnmark()
               }}
               className="text-[10px] font-medium px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
-              title="Owner-only: remove a manual shipping-paid mark (no-op if none exists)."
+              title="Remove a manual shipping-paid mark (no-op if none exists)."
             >
               {ownerControls!.busy ? '…' : 'Unmark'}
             </button>
@@ -229,8 +228,9 @@ function OrdersTable({
   ownerHooks,
 }: {
   lines: OrderLine[]
-  // Only supplied when the current viewer is the owner. Undefined for
-  // everyone else so the manual-mark buttons never render.
+  // Only supplied when the current viewer is a staff user (admin / team
+  // / support). Undefined for everyone else so the manual-mark buttons
+  // never render.
   ownerHooks?: {
     busyOrderId: string | null
     onMarkPaid: (orderId: string, orderRef: string) => Promise<void>
@@ -293,8 +293,11 @@ export default function CustomerCampaigns({
   // button + show a spinner without blocking any other row.
   const [markBusyOrderId, setMarkBusyOrderId] = useState<string | null>(null)
   const supabase = createClient()
-  const { user } = useAuth()
-  const ownerViewing = isOwner(user?.email)
+  const { role } = useAuth()
+  // Mark/unmark shipping-paid is now open to any staff role. The DB
+  // RPCs enforce the same gate so a role change alone can't widen
+  // access without a matching migration.
+  const canManageMarks = role === 'admin' || role === 'team' || role === 'support'
 
   const focusCampaign = initialCampaignId
     ? campaigns.find(c => c.campaign_id === initialCampaignId)
@@ -336,7 +339,7 @@ export default function CustomerCampaigns({
   // Build a per-campaign owner-hooks bundle to hand down to OrdersTable.
   // Non-owners get undefined so buttons never render.
   function ownerHooksFor(campaignId: number) {
-    if (!ownerViewing) return undefined
+    if (!canManageMarks) return undefined
     return {
       busyOrderId: markBusyOrderId,
       onMarkPaid: async (orderId: string, orderRef: string) => {
