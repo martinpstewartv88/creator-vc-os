@@ -87,9 +87,15 @@ function EditCustomerModal({
       setSubmitting(false)
       return
     }
-    // Refresh the server-rendered page so the new values show without a
-    // full reload. router.refresh re-renders the (app)/customers/[email]
-    // route, which re-fetches via getCustomerByEmail.
+    // getCustomerByEmail is wrapped in unstable_cache (600s revalidate),
+    // so router.refresh() alone would serve the old row. Bust the tag
+    // via a route handler first, then trigger the re-render.
+    try {
+      await fetch('/api/customer/revalidate', { method: 'POST' })
+    } catch {
+      // Non-fatal — worst case the operator sees the old address until
+      // the 10-min cache TTL rolls over. The DB write is already committed.
+    }
     router.refresh()
     onClose()
   }
