@@ -37,6 +37,17 @@ type OrderLine = {
   purchase_type: string
   financial_status: string | null
   delivery_status: 'pending_shipping' | 'shipping_paid' | 'dispatched' | 'digital' | null
+  // ISO timestamp of when the backer placed the order (shopify.processed_at,
+  // historic.order_created_at, entitlement.created_at). Nullable in case a
+  // legacy row is missing all three.
+  order_date: string | null
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 const DELIVERY_LABEL: Record<string, string> = {
@@ -126,9 +137,12 @@ function OrderHeader({
   const showMark   = ownerControls && line.delivery_status === 'pending_shipping'
   const showUnmark = ownerControls && line.delivery_status === 'shipping_paid'
   return (
-    <div className="grid grid-cols-[1fr_auto_auto] gap-4 md:gap-6 px-6 py-3 bg-zinc-900/60 border-b border-zinc-800/60">
+    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-4 md:gap-6 px-6 py-3 bg-zinc-900/60 border-b border-zinc-800/60">
       <HeaderCell label="Order Number">
         <span className="font-mono text-xs text-zinc-300 truncate">{ref}</span>
+      </HeaderCell>
+      <HeaderCell label="Order Date">
+        <span className="text-xs text-zinc-300 whitespace-nowrap">{fmtDate(line.order_date)}</span>
       </HeaderCell>
       <HeaderCell label="Payment Status">
         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 text-zinc-300 uppercase tracking-wide">
