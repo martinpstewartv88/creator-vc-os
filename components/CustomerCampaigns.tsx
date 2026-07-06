@@ -247,8 +247,8 @@ function OrdersTable({
   // never render.
   ownerHooks?: {
     busyOrderId: string | null
-    onMarkPaid: (orderId: string, orderRef: string) => Promise<void>
-    onUnmark:   (orderId: string, orderRef: string) => Promise<void>
+    onMarkPaid: (orderId: string, orderRef: string, purchaseType: string) => Promise<void>
+    onUnmark:   (orderId: string, orderRef: string, purchaseType: string) => Promise<void>
   }
 }) {
   if (lines.length === 0) {
@@ -259,15 +259,18 @@ function OrdersTable({
     <div>
       {orders.map(({ ref, lines: orderLines }) => {
         const isIsod = orderLines.every(l => l.purchase_type === 'isod')
-        // Manual shipping marks only apply to Shopify (raw_orders) rows.
-        // ISOD / historic branches hard-code delivery_status='dispatched'
-        // in the RPC, so this check is defensive but keeps the button
-        // from ever appearing on rows where it wouldn't take effect.
         const headLine = orderLines[0]
+        // Live Shopify (raw_orders) uses manual_shipping_marks.
+        // Historic sources (shopify_legacy, kickstarter, indiegogo, wix,
+        // gumroad-historic) use historic_line_dispatch_overrides. Both
+        // have write RPCs; the handler in ownerHooksFor routes by
+        // purchase_type. The old entitlement path (deprecated) doesn't
+        // have a write path — exclude it so we don't show a button
+        // that always errors.
         const canMark =
           !!ownerHooks &&
-          headLine.purchase_type === 'shopify' &&
-          !!headLine.order_id
+          !!headLine.order_id &&
+          isMarkableSource(headLine.purchase_type)
         return (
           <div key={ref} className="border-b border-zinc-800/40 last:border-0">
             <OrderHeader
@@ -276,8 +279,8 @@ function OrdersTable({
               ownerControls={canMark
                 ? {
                     busy: ownerHooks!.busyOrderId === headLine.order_id,
-                    onMarkPaid: () => ownerHooks!.onMarkPaid(headLine.order_id, ref),
-                    onUnmark:   () => ownerHooks!.onUnmark(headLine.order_id, ref),
+                    onMarkPaid: () => ownerHooks!.onMarkPaid(headLine.order_id, ref, headLine.purchase_type),
+                    onUnmark:   () => ownerHooks!.onUnmark(headLine.order_id, ref, headLine.purchase_type),
                   }
                 : undefined}
             />
@@ -287,6 +290,20 @@ function OrdersTable({
       })}
     </div>
   )
+}
+
+// Sources whose delivery_status the app can flip. Shopify → manual_
+// shipping_marks; everything else in this list → historic_line_
+// dispatch_overrides. Kept explicit so a novel source_platform doesn't
+// silently opt-in to the wrong write path.
+const HISTORIC_SOURCES = new Set([
+  'shopify_legacy', 'kickstarter', 'indiegogo', 'wix', 'gumroad', 'isod',
+])
+function isMarkableSource(pt: string): boolean {
+  return pt === 'shopify' || HISTORIC_SOURCES.has(pt)
+}
+function isHistoricSource(pt: string): boolean {
+  return HISTORIC_SOURCES.has(pt)
 }
 
 export default function CustomerCampaigns({
@@ -356,7 +373,7 @@ export default function CustomerCampaigns({
     if (!canManageMarks) return undefined
     return {
       busyOrderId: markBusyOrderId,
-      onMarkPaid: async (orderId: string, orderRef: string) => {
+      onMarkPaid: async (orderId: string, orderRef: string, purchaseType: string) => {
         if (!window.confirm(`Mark shipping as paid for order ${orderRef}?`)) return
         const note = window.prompt(
           'Reason (optional — e.g. "PayPal, pre-poll" or "paid via Glide 2026-05-29"):',
@@ -365,17 +382,29 @@ export default function CustomerCampaigns({
         if (note === null) return  // user cancelled the prompt
         setMarkBusyOrderId(orderId)
         try {
-          const { error } = await supabase.rpc('set_shipping_paid_mark', {
-            p_shopify_order_id: orderId,
-            p_note: note.trim() ? note.trim() : null,
-          })
-          if (error) throw error
-          // Fire-and-forget: notify Acutrack so they can queue the order
-          // for dispatch. Failures are logged server-side in
-          // aa_01_campaigns.acutrack_send_log but never block the mark.
-          void supabase.functions
-            .invoke('acutrack-send-order', { body: { shopify_order_id: orderId } })
-            .catch((err) => console.warn('[acutrack-send-order] invoke failed', err))
+          if (isHistoricSource(purchaseType)) {
+            // Historic order (shopify_legacy / kickstarter / indiegogo /
+            // wix / gumroad-historic). Batch-insert override rows for
+            // every line of the matching (source_order_id, campaign_id)
+            // pair. No Acutrack push — historic sources aren't in the
+            // Acutrack CSV pipeline.
+            const { error } = await supabase.rpc('set_historic_shipping_paid_mark', {
+              p_source_order_id: orderId,
+              p_campaign_id: campaignId,
+              p_note: note.trim() ? note.trim() : null,
+            })
+            if (error) throw error
+          } else {
+            const { error } = await supabase.rpc('set_shipping_paid_mark', {
+              p_shopify_order_id: orderId,
+              p_note: note.trim() ? note.trim() : null,
+            })
+            if (error) throw error
+            // Live Shopify only: notify Acutrack (fire-and-forget).
+            void supabase.functions
+              .invoke('acutrack-send-order', { body: { shopify_order_id: orderId } })
+              .catch((err) => console.warn('[acutrack-send-order] invoke failed', err))
+          }
           await refetchCampaign(campaignId)
         } catch (e) {
           alert(`Mark shipping paid failed: ${formatErrorMessage(e)}`)
@@ -383,14 +412,22 @@ export default function CustomerCampaigns({
           setMarkBusyOrderId(null)
         }
       },
-      onUnmark: async (orderId: string, orderRef: string) => {
+      onUnmark: async (orderId: string, orderRef: string, purchaseType: string) => {
         if (!window.confirm(`Remove manual shipping-paid mark for order ${orderRef}? (No-op if none exists.)`)) return
         setMarkBusyOrderId(orderId)
         try {
-          const { error } = await supabase.rpc('clear_shipping_paid_mark', {
-            p_shopify_order_id: orderId,
-          })
-          if (error) throw error
+          if (isHistoricSource(purchaseType)) {
+            const { error } = await supabase.rpc('clear_historic_shipping_paid_mark', {
+              p_source_order_id: orderId,
+              p_campaign_id: campaignId,
+            })
+            if (error) throw error
+          } else {
+            const { error } = await supabase.rpc('clear_shipping_paid_mark', {
+              p_shopify_order_id: orderId,
+            })
+            if (error) throw error
+          }
           await refetchCampaign(campaignId)
         } catch (e) {
           alert(`Unmark failed: ${formatErrorMessage(e)}`)
