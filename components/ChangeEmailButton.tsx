@@ -188,6 +188,13 @@ function ChangeEmailModal({
         })
         if (error) throw error
         const result = data as { new_email: string }
+        // Bust the customer-list + detail unstable_cache entries so the
+        // rename shows up on the next render. Without this, the old
+        // email keeps appearing in the /customers list for up to 10 min
+        // even though the DB is fresh.
+        try {
+          await fetch('/api/customer/revalidate', { method: 'POST' })
+        } catch { /* non-fatal — DB already committed */ }
         router.push(`/customers/${encodeURIComponent(result.new_email)}`)
         router.refresh()
       } else {
@@ -204,6 +211,12 @@ function ChangeEmailModal({
         })
         if (error) throw error
         const result = data as { survivor_email: string }
+        // Bust the list cache so the merged (deleted) customer stops
+        // appearing in search results even though the snapshot is
+        // already clean at the DB layer.
+        try {
+          await fetch('/api/customer/revalidate', { method: 'POST' })
+        } catch { /* non-fatal — DB already committed */ }
         router.push(`/customers/${encodeURIComponent(result.survivor_email)}`)
         router.refresh()
       }
