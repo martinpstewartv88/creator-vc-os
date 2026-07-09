@@ -369,8 +369,9 @@ export async function listCustomerTickets(
 }
 
 // Per-status counts for the badge row on top of the Tickets screen.
-// Returns ALL counts regardless of any list filter — i.e. these badges
-// always reflect the full dataset, not the current search/page.
+// When from/to are supplied, counts are scoped to that window so the
+// tab badges match the list below. Both null = all-time (the original
+// behaviour).
 export type TicketStatusCounts = {
   all: number
   Open: number
@@ -382,9 +383,14 @@ export type TicketStatusCounts = {
 
 export async function getTicketStatusCounts(
   supabase: SupabaseClient,
+  from?: string | null,
+  to?: string | null,
 ): Promise<TicketStatusCounts> {
   return withRetry(async () => {
-    const { data, error } = await supabase.rpc('tickets_status_counts')
+    const { data, error } = await supabase.rpc('tickets_status_counts', {
+      p_from: from ?? null,
+      p_to:   to ?? null,
+    })
     if (error) throw new Error(formatRpcError(error.message))
     const r = (data ?? {}) as Partial<Record<keyof TicketStatusCounts, number>>
     return {

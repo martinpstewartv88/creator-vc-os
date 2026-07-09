@@ -146,7 +146,7 @@ export default function TicketsSummaryCard({
         <div className="px-5 py-4 text-xs text-zinc-500">
           {ticketCount === 0
             ? 'No tickets in this window — nothing to summarise.'
-            : 'Click "Generate summary" to ask Claude to write a paragraph about what came in during this window. Theme counts are exact (computed in SQL); the prose is the LLM’s job.'}
+            : 'Click "Generate summary" to ask Claude to write a paragraph about what came in during this window.'}
         </div>
       )}
 

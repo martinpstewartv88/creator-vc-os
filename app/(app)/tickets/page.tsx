@@ -59,10 +59,15 @@ export default async function TicketsPage({
 
   const supabase = await createClient()
   // Fan out. Each failure tolerated — empty fallbacks so a partial
-  // outage doesn't blank the whole screen. Status counts stay
-  // all-time on purpose: the badges describe the whole dataset, not
-  // the current filter window (matches the original UX).
-  const [list, counts, timeline] = await Promise.all([
+  // outage doesn't blank the whole screen.
+  //
+  // Two count RPCs:
+  //   `counts` respects the active window so the tab badges match the
+  //   list below (Reiner's ask — previously the badges were frozen to
+  //   all-time and never moved with the filter).
+  //   `countsAllTime` stays unfiltered so the header subtitle can
+  //   surface the total dataset alongside the current-window count.
+  const [list, counts, countsAllTime, timeline] = await Promise.all([
     listTickets(supabase, {
       page: 1,
       pageSize: 25,
@@ -72,8 +77,16 @@ export default async function TicketsPage({
       console.error('[tickets] initial list failed', e)
       return { rows: [], total: 0 }
     }),
-    getTicketStatusCounts(supabase).catch((e): TicketStatusCounts => {
+    getTicketStatusCounts(
+      supabase,
+      isAllTime ? null : fromIso,
+      isAllTime ? null : toIso,
+    ).catch((e): TicketStatusCounts => {
       console.error('[tickets] counts failed', e)
+      return { all: 0, Open: 0, Pending: 0, Resolved: 0, Closed: 0, other: 0 }
+    }),
+    getTicketStatusCounts(supabase).catch((e): TicketStatusCounts => {
+      console.error('[tickets] all-time counts failed', e)
       return { all: 0, Open: 0, Pending: 0, Resolved: 0, Closed: 0, other: 0 }
     }),
     // Chart respects the active window. Falls back to the simple
@@ -98,7 +111,7 @@ export default async function TicketsPage({
           <div>
             <h1 className="text-xl md:text-2xl font-semibold text-white">Tickets</h1>
             <p className="text-sm text-zinc-500 mt-1">
-              {list.total.toLocaleString()} in window · {counts.all.toLocaleString()} all-time
+              {list.total.toLocaleString()} in window · {countsAllTime.all.toLocaleString()} all-time
             </p>
           </div>
         </div>
