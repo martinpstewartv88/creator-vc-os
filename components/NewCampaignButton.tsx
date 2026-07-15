@@ -122,15 +122,25 @@ function NewCampaignModal({ onClose }: { onClose: () => void }) {
           <input
             type="text"
             value={legacyCode}
-            onChange={(e) => setLegacyCode(e.target.value)}
+            // Normalise on every keystroke so it can't be saved in the
+            // wrong shape: uppercase, and any run of non-alphanumeric
+            // chars collapses to a single underscore. The shopify-webhook
+            // extracts the campaign suffix from order numbers like
+            // '#22093-JAWS-EXPLORED' and normalises to 'JAWS_EXPLORED'
+            // before querying campaigns.legacy_code — a mis-cased or
+            // dash-separated value silently mis-routes every future
+            // order to the default campaign.
+            onChange={(e) => setLegacyCode(
+              e.target.value.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+            )}
             required
             disabled={pending}
-            placeholder="e.g. phoenix-2026"
+            placeholder="e.g. PHOENIX_2026"
             className={inputCls}
           />
           <p className="text-[10px] text-zinc-600 mt-1">
-            This is for use in Shopify to ensure any copied or reused
-            products maintain a core SKU.
+            Used by the Shopify webhook to route orders to this campaign.
+            Must be UPPERCASE_UNDERSCORE — auto-normalised as you type.
           </p>
         </Field>
 
