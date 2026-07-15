@@ -16,6 +16,36 @@ const SOURCE_LABEL: Record<string, string> = {
   wix: 'Wix',
   isod: 'ISOD',
 }
+// Translate a raw PostgREST error into something readable for the product
+// save modal. We special-case the legacy_code unique-constraint hit —
+// bare Postgres error names the constraint, not the offending row, so
+// operators had no way to know which product was hoarding the code.
+// Falls through to formatErrorMessage for everything else.
+async function friendlyProductError(e: unknown, legacy: string): Promise<string> {
+  const obj = (e && typeof e === 'object') ? (e as Record<string, unknown>) : {}
+  const code = typeof obj.code === 'string' ? obj.code : null
+  const msg  = typeof obj.message === 'string' ? obj.message : ''
+  if (code === '23505' && (msg.includes('legacy_code') || msg.includes('products_legacy_code_key'))) {
+    try {
+      const supabase = createClient()
+      const { data } = await supabase
+        .schema('aa_01_campaigns')
+        .from('products')
+        .select('Name, campaign_id, campaigns:campaigns(Name)')
+        .eq('legacy_code', legacy)
+        .maybeSingle()
+      if (data) {
+        const owner = (data as { Name?: string }).Name || 'another product'
+        const camp  = (data as { campaigns?: { Name?: string } | null }).campaigns?.Name
+                    || `campaign #${(data as { campaign_id?: number }).campaign_id ?? '?'}`
+        return `Legacy code "${legacy}" is already used by "${owner}" in ${camp}. Pick a different code.`
+      }
+    } catch { /* fall through to generic */ }
+    return `Legacy code "${legacy}" is already in use on another product. Pick a different code.`
+  }
+  return formatErrorMessage(e)
+}
+
 function sourceLabel(s: string): string {
   return SOURCE_LABEL[s] ?? s.charAt(0).toUpperCase() + s.slice(1)
 }
@@ -461,7 +491,7 @@ function ProductForm({
       }
       onSaved()
     } catch (e) {
-      setErr(formatErrorMessage(e))
+      setErr(await friendlyProductError(e, legacy.trim()))
     } finally {
       setSaving(false)
     }
