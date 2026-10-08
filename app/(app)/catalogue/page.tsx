@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase-server'
 import { getCurrentRole } from '@/lib/auth-server'
 import { getCampaignProducts, type CampaignProductRow } from '@/lib/supabase'
 import CatalogueClient from '@/components/catalogue/CatalogueClient'
-import type { Campaign, Product, Variant } from '@/components/catalogue/types'
+import type { Campaign, Product, Variant, UnroutedSuffix } from '@/components/catalogue/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +23,7 @@ export default async function CataloguePage() {
   // SECURITY DEFINER delete RPC gated on admin) would be a follow-up.
   const role = await getCurrentRole()
 
-  const [campaignsRes, productsRes, variantsRes, inboxCountRes, mapRes] = await Promise.all([
+  const [campaignsRes, productsRes, variantsRes, inboxCountRes, mapRes, unroutedRes] = await Promise.all([
     supabase.schema('aa_01_campaigns').from('campaigns').select(CAMPAIGN_COLS).order('id'),
     supabase.schema('aa_01_campaigns').from('products').select(PRODUCT_COLS).order('id'),
     supabase.schema('aa_01_campaigns').from('variants').select(VARIANT_COLS).order('id'),
@@ -36,7 +36,9 @@ export default async function CataloguePage() {
       .schema('aa_01_campaigns')
       .from('shopify_variants_map')
       .select('variant_legacy_code'),
+    supabase.rpc('list_unrouted_order_suffixes'),
   ])
+  if (unroutedRes.error) console.error('[catalogue] list_unrouted_order_suffixes failed', unroutedRes.error)
 
   // Build a set of variant legacy_codes that have at least one Shopify mapping.
   const mappedLegacyCodes = new Set<string>(
@@ -74,6 +76,8 @@ export default async function CataloguePage() {
       mappedLegacyCodes={Array.from(mappedLegacyCodes)}
       observedByCampaign={observedByCampaign}
       pendingInboxCount={inboxCountRes.count ?? 0}
+      unroutedSuffixes={(unroutedRes.data ?? []) as UnroutedSuffix[]}
+      unroutedError={unroutedRes.error ? `Couldn't check for unrouted orders: ${unroutedRes.error.message}` : null}
       errors={{
         campaigns: campaignsRes.error?.message ?? null,
         products: productsRes.error?.message ?? null,

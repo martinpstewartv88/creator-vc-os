@@ -24,6 +24,16 @@ export type Variant = {
   source_type: string
 }
 
+export type UnroutedSuffix = {
+  suffix: string
+  order_count: number
+  sample_order_number: string | null
+  first_seen: string
+  last_seen: string
+  current_campaign_id: number | null
+  current_campaign_name: string | null
+}
+
 export type InboxRow = {
   id: number
   created_at: string

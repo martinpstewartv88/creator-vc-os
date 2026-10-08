@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { Package } from 'lucide-react'
+import { AlertTriangle, Package } from 'lucide-react'
 import type { Role } from '@/lib/auth'
 import type { CampaignProductRow } from '@/lib/supabase'
 import ProductsManager from './ProductsManager'
 import InboxManager from './InboxManager'
-import type { Campaign, Product, Variant } from './types'
+import UnroutedOrdersPanel from './UnroutedOrdersPanel'
+import type { Campaign, Product, Variant, UnroutedSuffix } from './types'
 
 type Tab = 'products' | 'inbox'
 
@@ -18,6 +19,8 @@ export default function CatalogueClient({
   mappedLegacyCodes,
   observedByCampaign,
   pendingInboxCount,
+  unroutedSuffixes,
+  unroutedError,
   errors,
 }: {
   role: Role
@@ -27,10 +30,14 @@ export default function CatalogueClient({
   mappedLegacyCodes: string[]
   observedByCampaign: Record<number, CampaignProductRow[]>
   pendingInboxCount: number
+  unroutedSuffixes: UnroutedSuffix[]
+  unroutedError: string | null
   errors: { campaigns: string | null; products: string | null; variants: string | null }
 }) {
   const [tab, setTab] = useState<Tab>('products')
-  const [inboxBadge, setInboxBadge] = useState(pendingInboxCount)
+  const [productInboxCount, setProductInboxCount] = useState(pendingInboxCount)
+  const [unroutedCount, setUnroutedCount] = useState(unroutedSuffixes.length)
+  const inboxBadge = productInboxCount + unroutedCount
   const mappedSet = new Set(mappedLegacyCodes)
 
   const errMsg = errors.campaigns || errors.products || errors.variants
@@ -53,10 +60,25 @@ export default function CatalogueClient({
         <div>
           <h1 className="text-xl md:text-2xl font-semibold text-white">Catalogue</h1>
           <p className="text-sm text-zinc-500 mt-1">
-            Products, variants and Shopify mappings. New Shopify variants land in the Inbox.
+            Products, variants and Shopify mappings. New Shopify variants and unrouted orders land in the Inbox.
           </p>
         </div>
       </header>
+
+      {unroutedCount > 0 && tab !== 'inbox' && (
+        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap bg-amber-950/30 border border-amber-900/60 rounded-xl px-4 py-3">
+          <p className="text-sm text-amber-200 flex items-center gap-2">
+            <AlertTriangle size={15} className="shrink-0" />
+            {unroutedCount} order suffix{unroutedCount === 1 ? '' : 'es'} not linked to a campaign
+          </p>
+          <button
+            onClick={() => setTab('inbox')}
+            className="px-3 py-1.5 text-xs font-bold rounded-md bg-amber-900/50 hover:bg-amber-900/70 text-amber-100 transition-colors"
+          >
+            Review
+          </button>
+        </div>
+      )}
 
       {/* Sub-tabs — pill style consistent with the campaign-detail tabs */}
       <div className="flex items-center gap-2 mb-6" role="tablist">
@@ -83,12 +105,18 @@ export default function CatalogueClient({
         )}
       </div>
       <div role="tabpanel" hidden={tab !== 'inbox'}>
+        <UnroutedOrdersPanel
+          initialRows={unroutedSuffixes}
+          loadError={unroutedError}
+          campaigns={campaigns}
+          onCountChange={setUnroutedCount}
+        />
         {tab === 'inbox' && (
           <InboxManager
             campaigns={campaigns}
             products={products}
             variants={variants}
-            onInboxCountChange={setInboxBadge}
+            onInboxCountChange={setProductInboxCount}
           />
         )}
       </div>

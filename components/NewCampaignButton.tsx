@@ -142,6 +142,13 @@ function NewCampaignModal({ onClose }: { onClose: () => void }) {
             Used by the Shopify webhook to route orders to this campaign.
             Must be UPPERCASE_UNDERSCORE — auto-normalised as you type.
           </p>
+          {legacyCode && (
+            <p className="text-[11px] text-zinc-400 mt-2">
+              Shopify orders numbered like{' '}
+              <span className="font-mono text-zinc-200">#12345-{legacyCode.replace(/_/g, '-')}</span>{' '}
+              will route here. Orders with any other suffix show up in Catalogue → Inbox to route.
+            </p>
+          )}
         </Field>
 
         {error && (
